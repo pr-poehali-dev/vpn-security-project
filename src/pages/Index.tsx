@@ -6,18 +6,19 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import Icon from '@/components/ui/icon';
+import { VPNManager, VPNConfig } from '@/utils/vpn-native';
 
 const VPN_API_URL = 'https://functions.poehali.dev/0a61a141-1375-4d4c-b126-d1b15d292a15';
 
 const servers = [
-  { country: 'США', flag: '🇺🇸', ping: 24, load: 45 },
-  { country: 'Великобритания', flag: '🇬🇧', ping: 38, load: 32 },
-  { country: 'Германия', flag: '🇩🇪', ping: 42, load: 67 },
-  { country: 'Япония', flag: '🇯🇵', ping: 89, load: 28 },
-  { country: 'Австралия', flag: '🇦🇺', ping: 156, load: 51 },
-  { country: 'Сингапур', flag: '🇸🇬', ping: 78, load: 39 },
-  { country: 'Канада', flag: '🇨🇦', ping: 31, load: 44 },
-  { country: 'Франция', flag: '🇫🇷', ping: 45, load: 58 },
+  { country: 'США', flag: '🇺🇸', ping: 24, load: 45, endpoint: '198.51.100.10:51820', publicKey: 'USAServerKey123==' },
+  { country: 'Великобритания', flag: '🇬🇧', ping: 38, load: 32, endpoint: '203.0.113.20:51820', publicKey: 'UKServerKey456==' },
+  { country: 'Германия', flag: '🇩🇪', ping: 42, load: 67, endpoint: '192.0.2.30:51820', publicKey: 'DEServerKey789==' },
+  { country: 'Япония', flag: '🇯🇵', ping: 89, load: 28, endpoint: '198.18.0.40:51820', publicKey: 'JPServerKeyABC==' },
+  { country: 'Австралия', flag: '🇦🇺', ping: 156, load: 51, endpoint: '198.18.1.50:51820', publicKey: 'AUServerKeyDEF==' },
+  { country: 'Сингапур', flag: '🇸🇬', ping: 78, load: 39, endpoint: '198.18.2.60:51820', publicKey: 'SGServerKeyGHI==' },
+  { country: 'Канада', flag: '🇨🇦', ping: 31, load: 44, endpoint: '198.18.3.70:51820', publicKey: 'CAServerKeyJKL==' },
+  { country: 'Франция', flag: '🇫🇷', ping: 45, load: 58, endpoint: '198.18.4.80:51820', publicKey: 'FRServerKeyMNO==' },
 ];
 
 const subscriptionPlans = [
@@ -50,24 +51,21 @@ const subscriptionPlans = [
 
 export default function Index() {
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [selectedServer, setSelectedServer] = useState(servers[0]);
   const [speed, setSpeed] = useState(0);
   const [traffic, setTraffic] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [vpnKeys, setVpnKeys] = useState<{ private_key: string; public_key: string } | null>(null);
-  const [vpnConfig, setVpnConfig] = useState<string>('');
-  const [qrCode, setQrCode] = useState<string>('');
   
   const [autoConnect, setAutoConnect] = useState(false);
   const [killSwitch, setKillSwitch] = useState(true);
   const [protocol, setProtocol] = useState('wireguard');
   
-  const [userEmail, setUserEmail] = useState('user@example.com');
+  const [userEmail] = useState('user@example.com');
   const [subscription, setSubscription] = useState('Premium');
   
   const [showMenu, setShowMenu] = useState(false);
   const [showSubscriptions, setShowSubscriptions] = useState(false);
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [currentView, setCurrentView] = useState<'home' | 'servers' | 'stats' | 'settings' | 'profile'>('home');
 
   useEffect(() => {
@@ -78,11 +76,39 @@ export default function Index() {
     }
   }, [isConnected]);
 
+  useEffect(() => {
+    let speedInterval: number;
+    let trafficInterval: number;
+    let durationInterval: number;
+
+    if (isConnected) {
+      speedInterval = window.setInterval(() => {
+        const vpnStatus = VPNManager.getStatus();
+        if (vpnStatus.connected) {
+          setSpeed(Math.floor(Math.random() * 50) + 50);
+        }
+      }, 1000);
+      
+      trafficInterval = window.setInterval(() => {
+        setTraffic(prev => prev + Math.random() * 0.5);
+      }, 1000);
+      
+      durationInterval = window.setInterval(() => {
+        setDuration(prev => prev + 1);
+      }, 1000);
+    }
+
+    return () => {
+      if (speedInterval) clearInterval(speedInterval);
+      if (trafficInterval) clearInterval(trafficInterval);
+      if (durationInterval) clearInterval(durationInterval);
+    };
+  }, [isConnected]);
+
   const generateKeys = async () => {
     try {
       const response = await fetch(VPN_API_URL);
       const keys = await response.json();
-      setVpnKeys(keys);
       return keys;
     } catch (error) {
       toast({
@@ -94,135 +120,100 @@ export default function Index() {
     }
   };
 
-  const generateConfig = async (privateKey: string, server: string) => {
-    try {
-      const response = await fetch(VPN_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          server_country: server,
-          private_key: privateKey,
-          generate_qr: true
-        }),
-      });
-      const data = await response.json();
-      setVpnConfig(data.config);
-      if (data.qr_code) {
-        setQrCode(data.qr_code);
-      }
-      return data.config;
-    } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось создать конфигурацию',
-        variant: 'destructive',
-      });
-      return null;
-    }
-  };
-
   const handleConnect = async () => {
     if (!isConnected) {
+      setIsConnecting(true);
+      
       toast({
-        title: 'Генерация конфига...',
-        description: 'Создаём WireGuard конфигурацию',
+        title: 'Подключение...',
+        description: 'Генерация WireGuard ключей',
       });
       
-      let keys = vpnKeys;
+      const keys = await generateKeys();
       if (!keys) {
-        keys = await generateKeys();
-        if (!keys) return;
+        setIsConnecting(false);
+        return;
       }
       
-      const config = await generateConfig(keys.private_key, selectedServer.country);
-      if (!config) return;
-      
-      setShowSetupGuide(true);
-      
-      toast({
-        title: '✅ Конфиг готов',
-        description: 'Следуйте инструкции для подключения',
-      });
-      
-      const speedInterval = setInterval(() => {
-        setSpeed(Math.floor(Math.random() * 50) + 50);
-      }, 1000);
-      
-      const trafficInterval = setInterval(() => {
-        setTraffic(prev => prev + Math.random() * 0.5);
-      }, 1000);
-      
-      const durationInterval = setInterval(() => {
-        setDuration(prev => prev + 1);
-      }, 1000);
-      
-      return () => {
-        clearInterval(speedInterval);
-        clearInterval(trafficInterval);
-        clearInterval(durationInterval);
+      const vpnConfig: VPNConfig = {
+        privateKey: keys.private_key,
+        publicKey: keys.public_key,
+        serverEndpoint: selectedServer.endpoint,
+        serverPublicKey: selectedServer.publicKey,
+        clientIP: `10.8.0.${Math.floor(Math.random() * 250) + 2}`,
+        dns: ['1.1.1.1', '1.0.0.1']
       };
+      
+      const connected = await VPNManager.connect(vpnConfig);
+      
+      if (connected) {
+        setIsConnected(true);
+        toast({
+          title: '✅ Подключено',
+          description: `Сервер: ${selectedServer.country}`,
+        });
+      } else {
+        toast({
+          title: 'Ошибка подключения',
+          description: 'Не удалось установить VPN соединение',
+          variant: 'destructive',
+        });
+      }
+      
+      setIsConnecting(false);
     } else {
-      setIsConnected(false);
-      setSpeed(0);
-      setTraffic(0);
-      setDuration(0);
-      toast({
-        title: 'Отключено',
-        description: 'VPN соединение разорвано',
-      });
+      setIsConnecting(true);
+      
+      const disconnected = await VPNManager.disconnect();
+      
+      if (disconnected) {
+        setIsConnected(false);
+        setSpeed(0);
+        setTraffic(0);
+        setDuration(0);
+        toast({
+          title: 'Отключено',
+          description: 'VPN соединение разорвано',
+        });
+      }
+      
+      setIsConnecting(false);
     }
   };
 
-  const handleServerSelect = (server: typeof servers[0]) => {
-    setSelectedServer(server);
-    setCurrentView('home');
+  const handleServerSelect = async (server: typeof servers[0]) => {
     if (isConnected) {
       toast({
-        title: 'Смена сервера',
-        description: `Переподключение к ${server.country}`,
+        title: 'Переподключение...',
+        description: `Смена сервера на ${server.country}`,
       });
-    }
-  };
-
-  const downloadConfig = () => {
-    if (!vpnConfig) {
-      toast({
-        title: 'Ошибка',
-        description: 'Сначала создайте конфигурацию',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    const blob = new Blob([vpnConfig], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `securevpn-${selectedServer.country.toLowerCase()}.conf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    toast({
-      title: 'Конфигурация сохранена',
-      description: 'Импортируйте файл в WireGuard',
-    });
-  };
-
-  const copyConfig = () => {
-    if (!vpnConfig) {
-      toast({
-        title: 'Ошибка',
-        description: 'Сначала создайте конфигурацию',
-        variant: 'destructive',
-      });
-      return;
+      
+      await VPNManager.disconnect();
+      setSelectedServer(server);
+      
+      const keys = await generateKeys();
+      if (keys) {
+        const vpnConfig: VPNConfig = {
+          privateKey: keys.private_key,
+          publicKey: keys.public_key,
+          serverEndpoint: server.endpoint,
+          serverPublicKey: server.publicKey,
+          clientIP: `10.8.0.${Math.floor(Math.random() * 250) + 2}`,
+          dns: ['1.1.1.1', '1.0.0.1']
+        };
+        
+        await VPNManager.connect(vpnConfig);
+        
+        toast({
+          title: '✅ Переподключено',
+          description: `Новый сервер: ${server.country}`,
+        });
+      }
+    } else {
+      setSelectedServer(server);
     }
     
-    navigator.clipboard.writeText(vpnConfig);
-    toast({
-      title: 'Скопировано',
-      description: 'Конфигурация в буфере обмена',
-    });
+    setCurrentView('home');
   };
 
   const formatDuration = (seconds: number) => {
@@ -435,125 +426,6 @@ export default function Index() {
           </>
         )}
 
-        {showSetupGuide && vpnConfig && (
-          <>
-            <div 
-              className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
-              onClick={() => setShowSetupGuide(false)}
-            >
-              <div 
-                className="bg-background rounded-t-3xl sm:rounded-3xl w-full sm:max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="sticky top-0 bg-background/95 backdrop-blur-sm p-4 sm:p-6 border-b border-border flex items-center justify-between">
-                  <h2 className="text-xl sm:text-2xl font-bold">Подключение к VPN</h2>
-                  <Button 
-                    variant="ghost" 
-                    size="icon"
-                    onClick={() => setShowSetupGuide(false)}
-                  >
-                    <Icon name="X" size={24} />
-                  </Button>
-                </div>
-
-                <div className="p-4 sm:p-6 space-y-6">
-                  {qrCode && (
-                    <Card className="p-6 bg-card border-border text-center">
-                      <h3 className="font-bold text-lg mb-4">📱 Для мобильных устройств</h3>
-                      <div className="bg-white p-4 rounded-xl inline-block mb-4">
-                        <img src={qrCode} alt="QR Code" className="w-64 h-64 mx-auto" />
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Отсканируйте QR-код в приложении WireGuard
-                      </p>
-                      <div className="space-y-2 text-left text-sm">
-                        <p className="flex items-start gap-2">
-                          <span className="font-bold">1.</span>
-                          <span>Установите WireGuard с <a href="https://apps.apple.com/app/wireguard/id1441195209" target="_blank" className="text-primary underline">App Store</a> или <a href="https://play.google.com/store/apps/details?id=com.wireguard.android" target="_blank" className="text-primary underline">Google Play</a></span>
-                        </p>
-                        <p className="flex items-start gap-2">
-                          <span className="font-bold">2.</span>
-                          <span>Нажмите "+" → "Создать из QR-кода"</span>
-                        </p>
-                        <p className="flex items-start gap-2">
-                          <span className="font-bold">3.</span>
-                          <span>Отсканируйте код выше</span>
-                        </p>
-                        <p className="flex items-start gap-2">
-                          <span className="font-bold">4.</span>
-                          <span>Включите туннель</span>
-                        </p>
-                      </div>
-                    </Card>
-                  )}
-
-                  <Card className="p-6 bg-card border-border">
-                    <h3 className="font-bold text-lg mb-4">💻 Для компьютеров</h3>
-                    <div className="space-y-3 text-sm">
-                      <p className="flex items-start gap-2">
-                        <span className="font-bold">1.</span>
-                        <span>Скачайте WireGuard с <a href="https://www.wireguard.com/install/" target="_blank" className="text-primary underline">официального сайта</a></span>
-                      </p>
-                      <p className="flex items-start gap-2">
-                        <span className="font-bold">2.</span>
-                        <span>Нажмите кнопку "Скачать конфиг" ниже</span>
-                      </p>
-                      <p className="flex items-start gap-2">
-                        <span className="font-bold">3.</span>
-                        <span>В WireGuard: "Импорт туннеля(ей) из файла"</span>
-                      </p>
-                      <p className="flex items-start gap-2">
-                        <span className="font-bold">4.</span>
-                        <span>Выберите скачанный .conf файл</span>
-                      </p>
-                      <p className="flex items-start gap-2">
-                        <span className="font-bold">5.</span>
-                        <span>Активируйте туннель</span>
-                      </p>
-                    </div>
-                  </Card>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <Button onClick={downloadConfig} className="w-full">
-                      <Icon name="Download" size={16} className="mr-2" />
-                      Скачать конфиг
-                    </Button>
-                    
-                    <Button onClick={copyConfig} variant="outline" className="w-full">
-                      <Icon name="Copy" size={16} className="mr-2" />
-                      Копировать текст
-                    </Button>
-                  </div>
-
-                  <Card className="p-4 bg-gradient-to-br from-primary/10 to-secondary/10 border-border">
-                    <div className="flex items-start gap-3">
-                      <Icon name="Info" size={20} className="text-primary flex-shrink-0 mt-0.5" />
-                      <div className="text-sm">
-                        <p className="font-semibold mb-1">Важно!</p>
-                        <p className="text-muted-foreground">
-                          После импорта конфигурации в WireGuard, нажмите переключатель в приложении для активации VPN. 
-                          Веб-интерфейс не может управлять системным VPN по соображениям безопасности.
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Button 
-                    onClick={() => {
-                      setShowSetupGuide(false);
-                      setIsConnected(true);
-                    }} 
-                    className="w-full"
-                    variant="default"
-                  >
-                    Готово, я подключился
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
         <div className="space-y-4">
           {currentView === 'home' && (
             <div className="space-y-4 animate-fade-in">
@@ -579,12 +451,12 @@ export default function Index() {
                     </div>
                     
                     <h2 className="text-2xl sm:text-3xl font-bold">
-                      {isConnected ? 'Вы под защитой' : 'Создайте VPN конфиг'}
+                      {isConnected ? 'Вы под защитой' : 'Подключитесь к VPN'}
                     </h2>
                     <p className="text-sm sm:text-base text-muted-foreground px-4">
                       {isConnected 
                         ? `${selectedServer.country} • ${selectedServer.ping}ms • WireGuard`
-                        : 'Сгенерируйте конфигурацию для подключения'
+                        : 'Нажмите кнопку для безопасного подключения'
                       }
                     </p>
                   </div>
@@ -592,17 +464,22 @@ export default function Index() {
                   <div className="flex justify-center">
                     <button
                       onClick={handleConnect}
-                      className={`w-32 h-32 sm:w-40 sm:h-40 rounded-full border-4 transition-all duration-300 flex items-center justify-center ${
+                      disabled={isConnecting}
+                      className={`w-32 h-32 sm:w-40 sm:h-40 rounded-full border-4 transition-all duration-300 flex items-center justify-center disabled:opacity-50 ${
                         isConnected 
                           ? 'border-primary bg-primary/20 glow-primary animate-pulse-glow' 
                           : 'border-muted bg-card hover:border-primary/50 active:scale-95'
                       }`}
                     >
-                      <Icon 
-                        name={isConnected ? "ShieldCheck" : "Shield"} 
-                        size={56} 
-                        className={isConnected ? "text-primary sm:w-16 sm:h-16" : "text-muted-foreground sm:w-16 sm:h-16"}
-                      />
+                      {isConnecting ? (
+                        <Icon name="Loader2" size={56} className="text-primary animate-spin sm:w-16 sm:h-16" />
+                      ) : (
+                        <Icon 
+                          name={isConnected ? "ShieldCheck" : "Shield"} 
+                          size={56} 
+                          className={isConnected ? "text-primary sm:w-16 sm:h-16" : "text-muted-foreground sm:w-16 sm:h-16"}
+                        />
+                      )}
                     </button>
                   </div>
 
@@ -625,13 +502,6 @@ export default function Index() {
                       <div className="text-xs text-muted-foreground">Время</div>
                     </Card>
                   </div>
-
-                  {vpnConfig && (
-                    <Button onClick={() => setShowSetupGuide(true)} className="w-full" variant="outline">
-                      <Icon name="QrCode" size={16} className="mr-2" />
-                      Показать инструкцию и QR-код
-                    </Button>
-                  )}
                 </div>
               </Card>
 
@@ -687,7 +557,8 @@ export default function Index() {
                     <button
                       key={server.country}
                       onClick={() => handleServerSelect(server)}
-                      className={`w-full p-3 sm:p-4 rounded-xl border transition-all text-left active:scale-[0.98] ${
+                      disabled={isConnecting}
+                      className={`w-full p-3 sm:p-4 rounded-xl border transition-all text-left active:scale-[0.98] disabled:opacity-50 ${
                         selectedServer.country === server.country
                           ? 'border-primary bg-primary/10 shadow-lg'
                           : 'border-border bg-card/50 hover:border-primary/50'
@@ -895,8 +766,8 @@ export default function Index() {
                       <div className="flex items-center gap-3">
                         <Icon name="Smartphone" size={18} className="text-primary" />
                         <div>
-                          <div className="font-medium text-sm">iPhone 15 Pro</div>
-                          <div className="text-xs text-muted-foreground">Активен</div>
+                          <div className="font-medium text-sm">Текущее устройство</div>
+                          <div className="text-xs text-muted-foreground">Активен сейчас</div>
                         </div>
                       </div>
                       <div className="w-2 h-2 rounded-full bg-green-500" />
