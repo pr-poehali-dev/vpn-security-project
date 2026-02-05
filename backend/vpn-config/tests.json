@@ -1,0 +1,30 @@
+{
+  "tests": [
+    {
+      "name": "Generate WireGuard keys",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "private_key": "string",
+        "public_key": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Generate VPN config",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "server_country": "США",
+        "private_key": "test_private_key_abc123=="
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "config": "string",
+        "server": "США"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
