@@ -56,6 +56,7 @@ export default function Index() {
   const [duration, setDuration] = useState(0);
   const [vpnKeys, setVpnKeys] = useState<{ private_key: string; public_key: string } | null>(null);
   const [vpnConfig, setVpnConfig] = useState<string>('');
+  const [qrCode, setQrCode] = useState<string>('');
   
   const [autoConnect, setAutoConnect] = useState(false);
   const [killSwitch, setKillSwitch] = useState(true);
@@ -66,6 +67,7 @@ export default function Index() {
   
   const [showMenu, setShowMenu] = useState(false);
   const [showSubscriptions, setShowSubscriptions] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [currentView, setCurrentView] = useState<'home' | 'servers' | 'stats' | 'settings' | 'profile'>('home');
 
   useEffect(() => {
@@ -100,10 +102,14 @@ export default function Index() {
         body: JSON.stringify({
           server_country: server,
           private_key: privateKey,
+          generate_qr: true
         }),
       });
       const data = await response.json();
       setVpnConfig(data.config);
+      if (data.qr_code) {
+        setQrCode(data.qr_code);
+      }
       return data.config;
     } catch (error) {
       toast({
@@ -118,8 +124,8 @@ export default function Index() {
   const handleConnect = async () => {
     if (!isConnected) {
       toast({
-        title: 'Подключение...',
-        description: 'Генерация ключей WireGuard',
+        title: 'Генерация конфига...',
+        description: 'Создаём WireGuard конфигурацию',
       });
       
       let keys = vpnKeys;
@@ -131,10 +137,11 @@ export default function Index() {
       const config = await generateConfig(keys.private_key, selectedServer.country);
       if (!config) return;
       
-      setIsConnected(true);
+      setShowSetupGuide(true);
+      
       toast({
-        title: '✅ Подключено',
-        description: `Сервер: ${selectedServer.country}`,
+        title: '✅ Конфиг готов',
+        description: 'Следуйте инструкции для подключения',
       });
       
       const speedInterval = setInterval(() => {
@@ -181,7 +188,7 @@ export default function Index() {
     if (!vpnConfig) {
       toast({
         title: 'Ошибка',
-        description: 'Сначала подключитесь к VPN',
+        description: 'Сначала создайте конфигурацию',
         variant: 'destructive',
       });
       return;
@@ -198,6 +205,23 @@ export default function Index() {
     toast({
       title: 'Конфигурация сохранена',
       description: 'Импортируйте файл в WireGuard',
+    });
+  };
+
+  const copyConfig = () => {
+    if (!vpnConfig) {
+      toast({
+        title: 'Ошибка',
+        description: 'Сначала создайте конфигурацию',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    navigator.clipboard.writeText(vpnConfig);
+    toast({
+      title: 'Скопировано',
+      description: 'Конфигурация в буфере обмена',
     });
   };
 
@@ -411,6 +435,125 @@ export default function Index() {
           </>
         )}
 
+        {showSetupGuide && vpnConfig && (
+          <>
+            <div 
+              className="fixed inset-0 bg-black/70 z-40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+              onClick={() => setShowSetupGuide(false)}
+            >
+              <div 
+                className="bg-background rounded-t-3xl sm:rounded-3xl w-full sm:max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 bg-background/95 backdrop-blur-sm p-4 sm:p-6 border-b border-border flex items-center justify-between">
+                  <h2 className="text-xl sm:text-2xl font-bold">Подключение к VPN</h2>
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={() => setShowSetupGuide(false)}
+                  >
+                    <Icon name="X" size={24} />
+                  </Button>
+                </div>
+
+                <div className="p-4 sm:p-6 space-y-6">
+                  {qrCode && (
+                    <Card className="p-6 bg-card border-border text-center">
+                      <h3 className="font-bold text-lg mb-4">📱 Для мобильных устройств</h3>
+                      <div className="bg-white p-4 rounded-xl inline-block mb-4">
+                        <img src={qrCode} alt="QR Code" className="w-64 h-64 mx-auto" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Отсканируйте QR-код в приложении WireGuard
+                      </p>
+                      <div className="space-y-2 text-left text-sm">
+                        <p className="flex items-start gap-2">
+                          <span className="font-bold">1.</span>
+                          <span>Установите WireGuard с <a href="https://apps.apple.com/app/wireguard/id1441195209" target="_blank" className="text-primary underline">App Store</a> или <a href="https://play.google.com/store/apps/details?id=com.wireguard.android" target="_blank" className="text-primary underline">Google Play</a></span>
+                        </p>
+                        <p className="flex items-start gap-2">
+                          <span className="font-bold">2.</span>
+                          <span>Нажмите "+" → "Создать из QR-кода"</span>
+                        </p>
+                        <p className="flex items-start gap-2">
+                          <span className="font-bold">3.</span>
+                          <span>Отсканируйте код выше</span>
+                        </p>
+                        <p className="flex items-start gap-2">
+                          <span className="font-bold">4.</span>
+                          <span>Включите туннель</span>
+                        </p>
+                      </div>
+                    </Card>
+                  )}
+
+                  <Card className="p-6 bg-card border-border">
+                    <h3 className="font-bold text-lg mb-4">💻 Для компьютеров</h3>
+                    <div className="space-y-3 text-sm">
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold">1.</span>
+                        <span>Скачайте WireGuard с <a href="https://www.wireguard.com/install/" target="_blank" className="text-primary underline">официального сайта</a></span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold">2.</span>
+                        <span>Нажмите кнопку "Скачать конфиг" ниже</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold">3.</span>
+                        <span>В WireGuard: "Импорт туннеля(ей) из файла"</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold">4.</span>
+                        <span>Выберите скачанный .conf файл</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold">5.</span>
+                        <span>Активируйте туннель</span>
+                      </p>
+                    </div>
+                  </Card>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Button onClick={downloadConfig} className="w-full">
+                      <Icon name="Download" size={16} className="mr-2" />
+                      Скачать конфиг
+                    </Button>
+                    
+                    <Button onClick={copyConfig} variant="outline" className="w-full">
+                      <Icon name="Copy" size={16} className="mr-2" />
+                      Копировать текст
+                    </Button>
+                  </div>
+
+                  <Card className="p-4 bg-gradient-to-br from-primary/10 to-secondary/10 border-border">
+                    <div className="flex items-start gap-3">
+                      <Icon name="Info" size={20} className="text-primary flex-shrink-0 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-semibold mb-1">Важно!</p>
+                        <p className="text-muted-foreground">
+                          После импорта конфигурации в WireGuard, нажмите переключатель в приложении для активации VPN. 
+                          Веб-интерфейс не может управлять системным VPN по соображениям безопасности.
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Button 
+                    onClick={() => {
+                      setShowSetupGuide(false);
+                      setIsConnected(true);
+                    }} 
+                    className="w-full"
+                    variant="default"
+                  >
+                    Готово, я подключился
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         <div className="space-y-4">
           {currentView === 'home' && (
             <div className="space-y-4 animate-fade-in">
@@ -436,12 +579,12 @@ export default function Index() {
                     </div>
                     
                     <h2 className="text-2xl sm:text-3xl font-bold">
-                      {isConnected ? 'Вы под защитой' : 'Подключитесь к VPN'}
+                      {isConnected ? 'Вы под защитой' : 'Создайте VPN конфиг'}
                     </h2>
                     <p className="text-sm sm:text-base text-muted-foreground px-4">
                       {isConnected 
                         ? `${selectedServer.country} • ${selectedServer.ping}ms • WireGuard`
-                        : 'Защитите свои данные одним нажатием'
+                        : 'Сгенерируйте конфигурацию для подключения'
                       }
                     </p>
                   </div>
@@ -483,10 +626,10 @@ export default function Index() {
                     </Card>
                   </div>
 
-                  {vpnKeys && (
-                    <Button onClick={downloadConfig} className="w-full" variant="outline">
-                      <Icon name="Download" size={16} className="mr-2" />
-                      Скачать конфиг WireGuard
+                  {vpnConfig && (
+                    <Button onClick={() => setShowSetupGuide(true)} className="w-full" variant="outline">
+                      <Icon name="QrCode" size={16} className="mr-2" />
+                      Показать инструкцию и QR-код
                     </Button>
                   )}
                 </div>

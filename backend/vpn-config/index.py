@@ -2,7 +2,9 @@ import json
 import os
 import secrets
 import base64
+import io
 from typing import Dict, Any
+import qrcode
 
 def generate_wireguard_keys() -> Dict[str, str]:
     """Генерирует пару приватный/публичный ключ для WireGuard"""
@@ -16,8 +18,11 @@ def generate_wireguard_keys() -> Dict[str, str]:
         'public_key': public_key
     }
 
-def generate_config(server_country: str, private_key: str) -> str:
+def generate_config(server_country: str, private_key: str, client_ip: str = None) -> str:
     """Генерирует конфигурационный файл WireGuard"""
+    
+    if not client_ip:
+        client_ip = f"10.8.0.{secrets.randbelow(250) + 2}"
     
     server_endpoints = {
         'США': '198.51.100.10:51820',
@@ -43,7 +48,7 @@ def generate_config(server_country: str, private_key: str) -> str:
     
     config = f"""[Interface]
 PrivateKey = {private_key}
-Address = 10.8.0.2/24
+Address = {client_ip}/24
 DNS = 1.1.1.1, 1.0.0.1
 
 [Peer]
@@ -54,11 +59,31 @@ PersistentKeepalive = 25
 """
     return config
 
+def generate_qr_code(config: str) -> str:
+    """Генерирует QR-код в base64 для конфигурации"""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(config)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    img_bytes = buffer.getvalue()
+    img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+    
+    return f"data:image/png;base64,{img_base64}"
+
 def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
     API для управления VPN конфигурациями:
     GET /vpn-config - генерирует новые ключи
-    POST /vpn-config - создаёт конфиг для сервера
+    POST /vpn-config - создаёт конфиг для сервера с QR-кодом
     """
     
     method = event.get('httpMethod', 'GET')
@@ -93,6 +118,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             body = json.loads(event.get('body', '{}'))
             server_country = body.get('server_country', 'США')
             private_key = body.get('private_key')
+            generate_qr = body.get('generate_qr', True)
             
             if not private_key:
                 return {
@@ -107,16 +133,22 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             
             config = generate_config(server_country, private_key)
             
+            response_data = {
+                'config': config,
+                'server': server_country
+            }
+            
+            if generate_qr:
+                qr_code = generate_qr_code(config)
+                response_data['qr_code'] = qr_code
+            
             return {
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                'body': json.dumps({
-                    'config': config,
-                    'server': server_country
-                }),
+                'body': json.dumps(response_data),
                 'isBase64Encoded': False
             }
         except Exception as e:
